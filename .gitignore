@@ -1,0 +1,42 @@
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Environment ──────────────────────────────────────────────────
+.env
+backend/.env
+backend/.env.example
+
+.venv/
+venv/
+env/
+
+# ── ChromaDB (local vector store) ────────────────────────────────
+chroma_db/
+chroma_db_v2/
+chroma_db_old*/
+
+# ── IDE ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Node (frontend) ─────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
