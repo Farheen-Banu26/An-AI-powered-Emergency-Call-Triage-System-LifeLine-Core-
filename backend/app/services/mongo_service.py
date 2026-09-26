@@ -56,6 +56,21 @@ def _serialize_messages(messages: list) -> list[dict]:
     return serialized
 
 
+def is_mongo_configured() -> bool:
+    """Check if MongoDB URI is configured."""
+    return bool(get_settings().mongodb_uri)
+
+
+async def ping_db() -> bool:
+    """Ping MongoDB to verify active connection."""
+    try:
+        db = get_db()
+        await db.command("ping")
+        return True
+    except Exception:
+        return False
+
+
 async def save_session(session_id: str, state: dict) -> None:
     """Upsert a session document in MongoDB."""
     db = get_db()
@@ -63,6 +78,13 @@ async def save_session(session_id: str, state: dict) -> None:
         "session_id": session_id,
         "emergency_type": state.get("emergency_type"),
         "location": state.get("location"),
+        "landmark": state.get("landmark"),
+        "latitude": state.get("latitude"),
+        "longitude": state.get("longitude"),
+        "location_accuracy": state.get("location_accuracy"),
+        "location_source": state.get("location_source"),
+        "location_status": state.get("location_status"),
+        "location_display": state.get("location_display"),
         "details": state.get("details"),
         "priority": state.get("priority"),
         "caller_name": state.get("caller_name"),
@@ -79,6 +101,12 @@ async def save_session(session_id: str, state: dict) -> None:
         "guidance": state.get("guidance"),
         "dispatch_plan": state.get("dispatch_plan", []),
         "retrieved_context": state.get("retrieved_context"),
+        "fake_probability": state.get("fake_probability"),
+        "fake_label": state.get("fake_label"),
+        "fake_signals": state.get("fake_signals", []),
+        "captured_images": state.get("captured_images", []),
+        "sensor_telemetry": state.get("sensor_telemetry"),
+        "selected_service": state.get("selected_service"),
         "missing_info": state.get("missing_info", []),
         "current_question": state.get("current_question"),
         "status": state.get("status", "gathering_info"),

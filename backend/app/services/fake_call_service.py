@@ -1,14 +1,19 @@
 """
-Fake / Prank Call Detection Service.
+Fake, Prank, and Test Call Detection Service.
 
-Multi-signal approach that combines:
-  1. Keyword / pattern matching (fast, deterministic)
-  2. Behavioral analysis (conversation-level patterns)
-  3. LLM-based analysis (deep, semantic — runs per turn)
+Multi-tier approach combining:
+  1. Explicit test & demo phrase detection (Deterministic, High Confidence)
+  2. Prank, joke, mockery, and absurd scenario detection
+  3. Behavioral conversation-level analysis (contradictions, vague stalling)
+  4. Distress guardrails (Anti-False-Negative protection for real uncertain callers)
+  5. LLM-assisted semantic scoring
 
-Each signal produces a 0.0–1.0 score. They are combined into a final
-`fake_probability` (0.0 = definitely real, 1.0 = definitely fake) and
-a `fake_label` (GENUINE / SUSPICIOUS / LIKELY_FAKE).
+Classifications:
+  - GENUINE_EMERGENCY: Real distress or credible emergency reported
+  - EXPLICIT_TEST: Caller explicitly stated they are testing, demoing, or no emergency exists
+  - LIKELY_FAKE: Absurd scenarios, blatant mockery, or repeated prank indicators
+  - SUSPICIOUS: Highly contradictory or questionable claims without distress
+  - AMBIGUOUS: Vague statements requiring continued triage
 """
 
 import logging
@@ -18,9 +23,30 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-# ── 1. Keyword / Pattern Rules ──────────────────────────────────
+# ── Explicit Test & Non-Emergency Statements ─────────────────────
+_EXPLICIT_TEST_PATTERNS: list[str] = [
+    r"\b(?:i\s*am|i'm|im|we\s*are|we're)\s+(?:only\s+|just\s+|simply\s+)?(?:testing|demoing|demonstrating|practicing|trying)\b",
+    r"\b(?:this\s+is\s+|it's\s+|its\s+)?(?:only\s+|just\s+|simply\s+)?a\s+(?:test|demo|demonstration|trial|practice|drill)\b",
+    r"\btesting\s+the\s+(?:system|app|application|service|lifeline)\b",
+    r"\b(?:just\s+|only\s+)?testing\s+lifeline\b",
+    r"\bthere\s+is\s+no\s+(?:real\s+|actual\s+|genuine\s+)?emergency\b",
+    r"\bno\s+(?:real\s+|actual\s+|genuine\s+)?emergency\s*(?:here|at\s*all)?\b",
+    r"\b(?:this\s+is\s+)?(?:not|isn't|is\s+not)\s+a\s+(?:real|genuine|actual)?\s*emergency\b",
+    r"\bnot\s+(?:actually\s+|really\s+)?in\s+(?:danger|trouble|harm)\b",
+    r"\b(?:i\s*am|i'm|im|we\s*are|we're)\s+not\s+(?:actually\s+|really\s+)?in\s+(?:danger|trouble)\b",
+    r"\b(?:for\s+)?demonstration\s+(?:purposes?|only|mode|call)?\b",
+    r"\bchecking\s+(?:whether|if)\s+(?:the\s+emergency\s+system|the\s+app|this|it)\s+works\b",
+    r"\bsystem\s+test\b",
+    r"\bjust\s+(?:trying|checking)\s+(?:out\s+)?(?:the\s+app|the\s+system|lifeline)\b",
+    r"\b(?:don't|do\s*not)\s+send\s+(?:anyone|help|an?\s*ambulance|police|fire)\b",
+    r"\bpractice\s+call\b",
+    r"\bdoing\s+a\s+(?:demonstration|test|demo)\b",
+    r"\bdemonstrating\s+the\s+(?:app|system|software)\b",
+    r"\bparikshan\b",      # Hindi for testing
+    r"\bsochanai\b",       # Tamil for testing
+]
 
-# Phrases that strongly indicate a prank
+# ── Prank, Mockery & Slang Phrases ──────────────────────────────
 _PRANK_PHRASES: list[str] = [
     "just kidding",
     "jk",
@@ -31,15 +57,8 @@ _PRANK_PHRASES: list[str] = [
     "im joking",
     "not real",
     "fake call",
-    "testing",
-    "test call",
-    "just testing",
     "prank call",
-    "dare",
-    "for fun",
     "for a dare",
-    "lol",
-    "haha",
     "just playing",
     "messing around",
     "fooling around",
@@ -49,42 +68,66 @@ _PRANK_PHRASES: list[str] = [
     "bakwas",           # Hindi for nonsense
     "timepass",
     "time pass",
-    "joke",
-    "joking",
     "sike",
     "psych",
     "gotcha",
     "april fools",
-    "never mind",
-    "nevermind",
-    "nothing happened",
-    "nothing is happening",
-    "no emergency",
-    "there is no emergency",
-    "false alarm",
+    "vilayattu",        # Tamil for playing / joke
 ]
 
-# Phrases indicating genuine distress (counter-signal)
+# ── Impossible / Absurd Scenarios ───────────────────────────────
+_ABSURD_PATTERNS: list[str] = [
+    r"\balien(?:s)?\b",
+    r"\bufo(?:s)?\b",
+    r"\bzombie(?:s)?\b",
+    r"\bdinosaur(?:s)?\b",
+    r"\bdragon(?:s)?\b",
+    r"\bmeteor\s*(?:strike|hit)?\b",
+    r"\bspaceship\b",
+    r"\bgodzilla\b",
+    r"\bvampire(?:s)?\b",
+    r"\bwerewolf\b",
+    r"\brobot\s*attack\b",
+    r"\btime\s*travel\b",
+    r"\bintergalactic\b",
+]
+
+# ── Genuine Distress Counter-Signals (Safety Guardrails) ─────────
 _DISTRESS_PHRASES: list[str] = [
     "help",
     "please help",
     "hurry",
     "dying",
     "bleeding",
+    "blood",
     "can't breathe",
     "cannot breathe",
+    "not breathing",
+    "stopped breathing",
     "heart attack",
+    "cardiac arrest",
     "unconscious",
+    "not responding",
+    "passed out",
+    "collapsed",
     "fire",
+    "smoke",
+    "burning",
+    "flames",
     "trapped",
     "shot",
+    "gunshot",
     "stabbed",
+    "knife",
     "drowning",
     "accident",
-    "collapse",
+    "crash",
+    "collision",
     "seizure",
+    "stroke",
     "chest pain",
-    "emergency",
+    "medical emergency",
+    "life threatening",
     "ambulance",
     "hurry up",
     "come fast",
@@ -92,30 +135,16 @@ _DISTRESS_PHRASES: list[str] = [
     "save",
     "bachao",           # Hindi for "save me"
     "madad",            # Hindi for "help"
-]
-
-# Impossible / absurd scenarios
-_ABSURD_PATTERNS: list[str] = [
-    r"alien",
-    r"ufo",
-    r"zombie",
-    r"dinosaur",
-    r"dragon",
-    r"meteor",
-    r"spaceship",
-    r"godzilla",
-    r"vampire",
-    r"werewolf",
-    r"robot\s*attack",
-    r"nuclear\s*bomb",
-    r"time\s*travel",
+    "kaapaatunga",      # Tamil for "save me"
+    "maruthuva uthavi", # Tamil for "medical help"
+    "theeyinaippu",     # Tamil for "fire service"
 ]
 
 
 class FakeCallDetector:
     """
-    Stateful fake-call detector that accumulates evidence across
-    multiple conversation turns for a single session.
+    Multi-signal Fake, Prank, and Test Call Detector.
+    Ensures safe classification with zero false-negative tolerance for real emergencies.
     """
 
     def __init__(self):
@@ -125,8 +154,6 @@ class FakeCallDetector:
         self._absurd_hits: int = 0
         self._contradiction_count: int = 0
         self._prev_emergency_type: Optional[str] = None
-
-    # ── Public API ──────────────────────────────────────────────
 
     def evaluate_turn(
         self,
@@ -142,51 +169,80 @@ class FakeCallDetector:
 
         Returns:
             {
-                "fake_probability": 0.0–1.0,
-                "fake_label": "GENUINE" | "SUSPICIOUS" | "LIKELY_FAKE",
-                "fake_signals": ["list of reasons"],
+                "fake_probability": float (0.0 to 1.0),
+                "fake_label": "GENUINE" | "EXPLICIT_TEST" | "LIKELY_FAKE" | "SUSPICIOUS" | "AMBIGUOUS",
+                "is_test_call": bool,
+                "fake_signals": list[str],
             }
         """
         self._history.append(transcript)
         text = transcript.lower().strip()
         signals: list[str] = []
 
-        # ── Signal 1: Prank keywords ────────────────────────────
-        keyword_score = self._check_keywords(text, signals)
+        # ── Step 1: Check Explicit Test Patterns First ───────────
+        is_explicit_test = False
+        for pattern in _EXPLICIT_TEST_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                is_explicit_test = True
+                signals.append(f"Explicit test statement: matched '{pattern}'")
+                break
 
-        # ── Signal 2: Absurd scenario ───────────────────────────
+        # ── Step 2: Check Distress Guardrails (Safety First) ─────
+        distress_score = self._check_distress(text)
+        has_critical_distress = distress_score >= 0.25
+
+        # If user explicitly states it's a test and NO critical distress keywords are present
+        if is_explicit_test and not has_critical_distress:
+            logger.info("Explicit test call detected [%s]", text[:60])
+            return {
+                "fake_probability": 1.0,
+                "fake_label": "EXPLICIT_TEST",
+                "is_test_call": True,
+                "fake_signals": signals,
+            }
+
+        # ── Step 3: Check Prank Keywords & Absurd Scenarios ──────
+        keyword_score = self._check_keywords(text, signals)
         absurd_score = self._check_absurd(text, signals)
 
-        # ── Signal 3: Behavioral patterns ───────────────────────
+        # ── Step 4: Check Behavioral Patterns ────────────────────
         behavior_score = self._check_behavior(
             text, emergency_type, location, details, turn_count, signals
         )
 
-        # ── Signal 4: LLM-based score (if provided by the analyst node)
-        llm_score = llm_fake_score if llm_fake_score is not None else 0.0
+        # ── Step 5: LLM-based score ──────────────────────────────
+        llm_score = float(llm_fake_score) if llm_fake_score is not None else 0.0
 
-        # ── Combine signals ─────────────────────────────────────
-        # Weighted average: keywords (0.30), absurd (0.20), behavior (0.25), LLM (0.25)
-        raw = (
-            keyword_score * 0.30
-            + absurd_score * 0.20
-            + behavior_score * 0.25
-            + llm_score * 0.25
-        )
+        # ── Step 6: Combine Signals ──────────────────────────────
+        if absurd_score > 0.5:
+            raw = max(0.85, absurd_score)
+        elif keyword_score > 0.5:
+            raw = max(0.75, keyword_score)
+        else:
+            raw = (
+                keyword_score * 0.35
+                + behavior_score * 0.35
+                + llm_score * 0.30
+            )
 
-        # Reduce score if genuine distress signals are present
-        distress_score = self._check_distress(text)
+        # Apply distress mitigation: Real distress drastically reduces fake probability
         if distress_score > 0:
-            raw = max(0.0, raw - distress_score * 0.5)
-            if distress_score > 0.3:
-                signals.append("Distress signals detected — reducing fake probability")
+            raw = max(0.0, raw - distress_score * 0.75)
+            signals.append("Distress signals detected — mitigating fake probability")
 
         fake_probability = round(min(1.0, max(0.0, raw)), 2)
 
-        if fake_probability >= 0.7:
+        # Classify label
+        if has_critical_distress:
+            # Under critical distress, never label as fake
+            fake_label = "GENUINE"
+            fake_probability = min(fake_probability, 0.1)
+        elif fake_probability >= 0.75:
             fake_label = "LIKELY_FAKE"
-        elif fake_probability >= 0.4:
+        elif fake_probability >= 0.45:
             fake_label = "SUSPICIOUS"
+        elif any(term in text for term in ["not sure", "might be", "i think", "maybe", "confused"]) and not emergency_type:
+            fake_label = "AMBIGUOUS"
         else:
             fake_label = "GENUINE"
 
@@ -198,32 +254,24 @@ class FakeCallDetector:
         return {
             "fake_probability": fake_probability,
             "fake_label": fake_label,
+            "is_test_call": is_explicit_test,
             "fake_signals": signals,
         }
 
-    # ── Private Checks ──────────────────────────────────────────
-
     def _check_keywords(self, text: str, signals: list[str]) -> float:
-        """Check for prank-indicating phrases. Returns 0.0–1.0."""
-        hits = 0
-        for phrase in _PRANK_PHRASES:
-            if phrase in text:
-                hits += 1
-                self._prank_hits += 1
+        hits = sum(1 for phrase in _PRANK_PHRASES if phrase in text)
         if hits:
+            self._prank_hits += hits
             signals.append(f"Prank keywords detected ({hits} matches)")
-        # Single match = 0.6, multiple = higher
-        if hits == 0:
-            return 0.0
-        return min(1.0, 0.6 + (hits - 1) * 0.15)
+            return min(1.0, 0.7 + (hits - 1) * 0.15)
+        return 0.0
 
     def _check_absurd(self, text: str, signals: list[str]) -> float:
-        """Check for absurd/impossible scenarios. Returns 0.0–1.0."""
         for pattern in _ABSURD_PATTERNS:
             if re.search(pattern, text, re.IGNORECASE):
                 self._absurd_hits += 1
                 signals.append(f"Absurd scenario: matched '{pattern}'")
-                return 0.8
+                return 0.95
         return 0.0
 
     def _check_behavior(
@@ -235,47 +283,36 @@ class FakeCallDetector:
         turn_count: int,
         signals: list[str],
     ) -> float:
-        """Behavioral analysis across the conversation. Returns 0.0–1.0."""
         score = 0.0
 
-        # Contradiction: emergency type changed drastically between turns
-        if emergency_type and self._prev_emergency_type:
-            if emergency_type != self._prev_emergency_type:
-                self._contradiction_count += 1
-                signals.append(
-                    f"Emergency type changed: {self._prev_emergency_type} → {emergency_type}"
-                )
-                score += 0.4
+        if emergency_type and self._prev_emergency_type and emergency_type != self._prev_emergency_type:
+            self._contradiction_count += 1
+            signals.append(f"Emergency type changed: {self._prev_emergency_type} → {emergency_type}")
+            score += 0.4
         self._prev_emergency_type = emergency_type
 
-        # Multiple contradictions = very suspicious
-        if self._contradiction_count >= 2:
-            score += 0.3
-            signals.append("Multiple contradictions across turns")
-
-        # Laughter / mockery patterns in text
         laugh_patterns = [r"ha{2,}", r"lol+", r"lmao", r"rofl", r"😂", r"🤣"]
         for lp in laugh_patterns:
             if re.search(lp, text, re.IGNORECASE):
-                score += 0.3
+                score += 0.4
                 signals.append("Laughter/mockery detected")
                 break
 
-        # Very vague across multiple turns (no location, no details after 3+ turns)
         if turn_count >= 3 and not location and not details:
-            score += 0.2
+            score += 0.25
             signals.append("No location or details after 3+ turns")
 
-        # Accumulated prank keyword hits across session
-        if self._prank_hits >= 3:
-            score += 0.3
-            signals.append(f"Repeated prank keywords across session ({self._prank_hits} total)")
+        if self._prank_hits >= 2:
+            score += 0.35
+            signals.append(f"Repeated prank indicators ({self._prank_hits} total)")
 
         return min(1.0, score)
 
     def _check_distress(self, text: str) -> float:
-        """Check for genuine distress indicators. Returns 0.0–1.0."""
-        hits = sum(1 for phrase in _DISTRESS_PHRASES if phrase in text)
+        # Strip negative statements before checking distress phrases
+        cleaned = re.sub(r"\b(?:no|not|never|without)\s+(?:emergency|danger|harm|injury|problem|threat|injuries)\b", "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(?:just|system)\s+testing\b", "", cleaned, flags=re.IGNORECASE)
+        hits = sum(1 for phrase in _DISTRESS_PHRASES if phrase in cleaned)
         if hits == 0:
             return 0.0
-        return min(1.0, hits * 0.25)
+        return min(1.0, hits * 0.35)

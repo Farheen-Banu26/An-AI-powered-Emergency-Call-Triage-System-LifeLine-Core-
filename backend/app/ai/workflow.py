@@ -46,27 +46,13 @@ def build_workflow():
     graph.set_entry_point("analyst")
 
     # ── Edges ────────────────────────────────────────────────────
-    # analyst → fake_call_check → completeness_checker (always)
+    # analyst → fake_call_check → completeness_checker → summarizer → service_router → question_generator → guidance → END
     graph.add_edge("analyst", "fake_call_check")
     graph.add_edge("fake_call_check", "completeness_checker")
-    
-    # completeness_checker → summarizer (always, to provide real-time updates)
     graph.add_edge("completeness_checker", "summarizer")
-
-    # summarizer → (conditional)
-    #   gathering_info     → question_generator → END
-    #   ready_to_dispatch  → service_router → guidance → END
-    graph.add_conditional_edges(
-        "summarizer",
-        _should_ask_or_dispatch,
-        {
-            "question_generator": "question_generator",
-            "service_router": "service_router",
-        },
-    )
-
-    graph.add_edge("question_generator", END)
-    graph.add_edge("service_router", "guidance")
+    graph.add_edge("summarizer", "service_router")
+    graph.add_edge("service_router", "question_generator")
+    graph.add_edge("question_generator", "guidance")
     graph.add_edge("guidance", END)
 
     return graph.compile()

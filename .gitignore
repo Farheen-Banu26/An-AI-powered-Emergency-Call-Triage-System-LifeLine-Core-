@@ -9,8 +9,8 @@ build/
 
 # ── Environment ──────────────────────────────────────────────────
 .env
+*.env
 backend/.env
-backend/.env.example
 
 .venv/
 venv/

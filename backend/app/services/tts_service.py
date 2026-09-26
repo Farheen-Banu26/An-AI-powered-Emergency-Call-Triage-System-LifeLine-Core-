@@ -17,7 +17,16 @@ class TTSService:
         "en": "en-IN",  # English (Indian accent)
         "ta": "ta-IN",  # Tamil
         "hi": "hi-IN",  # Hindi
+        "te": "te-IN",  # Telugu
+        "kn": "kn-IN",  # Kannada
+        "bn": "bn-IN",  # Bengali
+        "mr": "mr-IN",  # Marathi
+        "gu": "gu-IN",  # Gujarati
+        "ml": "ml-IN",  # Malayalam
+        "pa": "pa-IN",  # Punjabi
+        "od": "od-IN",  # Odia
     }
+
 
     def __init__(self, api_key: Optional[str] = None):
         settings = get_settings()
@@ -35,6 +44,27 @@ class TTSService:
 
         self.stream_chunk_size = 4096  # 4 KB
 
+    def synthesize_base64_audio(self, text: str, language_code: str = "en") -> Optional[str]:
+        """
+        Synthesizes text to speech and returns the complete audio as a base64 encoded string.
+        """
+        if not self.client:
+            return None
+        target_lang = self.LANGUAGE_MAP.get(language_code, "en-IN")
+        try:
+            response = self.client.text_to_speech.convert(
+                text=text,
+                target_language_code=target_lang,
+                model="bulbul:v3",
+                speech_sample_rate=16000,
+            )
+            audios = getattr(response, "audios", None)
+            if audios and len(audios) > 0:
+                return audios[0]
+        except Exception as e:
+            logger.error("TTS conversion error for lang %s: %s", language_code, e)
+        return None
+
     def stream_speech(self, text: str, language_code: str = "hi") -> Generator[bytes, None, None]:
         """
         Synthesizes text to speech and yields audio bytes in chunks.
@@ -49,7 +79,7 @@ class TTSService:
             response = self.client.text_to_speech.convert(
                 text=text,
                 target_language_code=target_lang,
-                model="bulbul:v2",
+                model="bulbul:v3",
                 speech_sample_rate=16000
             )
             

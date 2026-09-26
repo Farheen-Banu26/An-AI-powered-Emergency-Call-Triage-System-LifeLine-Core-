@@ -37,6 +37,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("MONGODB_URI not set — sessions will NOT be persisted")
 
+    # Warm up ChromaDB Vector Store so first query has zero cold latency
+    try:
+        from app.services.rag_service import retrieve_context
+        retrieve_context("emergency medical ambulance protocol")
+        logger.info("ChromaDB vector store warmed up successfully.")
+    except Exception as e:
+        logger.warning("ChromaDB warmup note: %s", e)
+
     logger.info(
         "Lifeline-Core started | provider=%s | model=%s | ollama=%s | chroma=%s",
         settings.llm_provider,
